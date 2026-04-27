@@ -22,24 +22,47 @@ export const ASRS_QUESTIONS = [
 ];
 
 export const ASRS_OPTIONS = [
-  { value: 0, label: "Nunca",               hint: "Não acontece comigo" },
-  { value: 1, label: "Raramente",           hint: "Acontece poucas vezes" },
-  { value: 2, label: "Às vezes",            hint: "Acontece ocasionalmente" },
-  { value: 3, label: "Frequentemente",      hint: "Acontece com frequência" },
-  { value: 4, label: "Muito frequentemente",hint: "Acontece quase sempre" },
+  { value: 0, label: "Nunca",                hint: "Não acontece comigo" },
+  { value: 1, label: "Raramente",            hint: "Acontece poucas vezes" },
+  { value: 2, label: "Às vezes",             hint: "Acontece ocasionalmente" },
+  { value: 3, label: "Frequentemente",       hint: "Acontece com frequência" },
+  { value: 4, label: "Muito frequentemente", hint: "Acontece quase sempre" },
 ];
 
-// ASRS v1.1 Part A thresholds per question (index 0-5)
-// Q1-Q3 (idx 0-2): score point if answer >= 2 (Sometimes+)
-// Q4-Q6 (idx 3-5): score point if answer >= 3 (Often+)
+// ASRS v1.1 Part A thresholds (index 0-5)
+// Q1-Q3: score if answer >= 2 | Q4-Q6: score if answer >= 3
 export const PART_A_THRESHOLDS = [2, 2, 2, 3, 3, 3];
+
+// GAD-2 + PHQ-2 comorbidity screening (shown only if ASRS risk >= moderate)
+export const COMORBIDITY_QUESTIONS = [
+  // GAD-2 — Anxiety
+  "Nos últimos 2 meses, com que frequência você se sentiu nervoso, ansioso ou no limite?",
+  "Nos últimos 2 meses, com que frequência você não conseguiu parar ou controlar as preocupações?",
+  // PHQ-2 — Depression
+  "Nos últimos 2 meses, com que frequência você se sentiu para baixo, deprimido ou sem esperança?",
+  "Nos últimos 2 meses, com que frequência você teve pouco interesse ou prazer em fazer as coisas?",
+];
+
+export const COMORBIDITY_OPTIONS = [
+  { value: 0, label: "Nunca",                    hint: "Nenhum dia" },
+  { value: 1, label: "Vários dias",              hint: "Menos da metade dos dias" },
+  { value: 2, label: "Mais da metade dos dias",  hint: "Com bastante frequência" },
+  { value: 3, label: "Quase todos os dias",      hint: "Quase sempre" },
+];
 
 export type RiskLevel = "low" | "moderate" | "high";
 
+export interface ComorbidityResult {
+  anxietyScore: number;   // 0-6
+  depressionScore: number; // 0-6
+  anxietyPositive: boolean;   // >= 3
+  depressionPositive: boolean; // >= 3
+}
+
 export interface ScoringResult {
-  partAScore: number;   // 0-6 (positive items)
-  partATotal: number;   // raw sum 0-24
-  partBTotal: number;   // raw sum 0-48
+  partAScore: number;
+  partATotal: number;
+  partBTotal: number;
   riskLevel: RiskLevel;
   subtype: string;
 }
@@ -47,7 +70,6 @@ export interface ScoringResult {
 export function scoreAnswers(answers: (number | null)[]): ScoringResult {
   const filled = answers.map((a) => a ?? 0);
 
-  // Part A: count positive items using per-question thresholds
   let partAScore = 0;
   let partATotal = 0;
   for (let i = 0; i < 6; i++) {
@@ -55,17 +77,14 @@ export function scoreAnswers(answers: (number | null)[]): ScoringResult {
     if (filled[i] >= PART_A_THRESHOLDS[i]) partAScore++;
   }
 
-  // Part B: raw sum
   let partBTotal = 0;
   for (let i = 6; i < 18; i++) partBTotal += filled[i];
 
-  // Risk level based on Part A positive items
   let riskLevel: RiskLevel;
   if (partAScore <= 2) riskLevel = "low";
   else if (partAScore === 3) riskLevel = "moderate";
   else riskLevel = "high";
 
-  // Subtype: compare inattentive (idx 0-2, 6-9, 17) vs hyperactive (idx 3-5, 10-16)
   const inattentiveRaw =
     filled[0] + filled[1] + filled[2] + filled[6] + filled[7] + filled[8] + filled[9] + filled[17];
   const hyperactiveRaw =
@@ -84,4 +103,15 @@ export function scoreAnswers(answers: (number | null)[]): ScoringResult {
   }
 
   return { partAScore, partATotal, partBTotal, riskLevel, subtype };
+}
+
+export function scoreComorbidities(answers: number[]): ComorbidityResult {
+  const anxietyScore = (answers[0] ?? 0) + (answers[1] ?? 0);
+  const depressionScore = (answers[2] ?? 0) + (answers[3] ?? 0);
+  return {
+    anxietyScore,
+    depressionScore,
+    anxietyPositive: anxietyScore >= 3,
+    depressionPositive: depressionScore >= 3,
+  };
 }

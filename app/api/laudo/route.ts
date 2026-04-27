@@ -1,45 +1,79 @@
 import { generateText } from "ai";
 import { google } from "@ai-sdk/google";
 import { NextRequest, NextResponse } from "next/server";
-import type { ScoringResult } from "@/lib/asrs-data";
+import type { ScoringResult, ComorbidityResult } from "@/lib/asrs-data";
+
+function analyzeTimings(timings: number[]): string {
+  if (!timings.length) return "";
+  const lines: string[] = [];
+  timings.forEach((ms, i) => {
+    if (ms <= 0) return;
+    const secs = (ms / 1000).toFixed(1);
+    if (ms < 3000) lines.push(`Pergunta ${i + 1}: ${secs}s (resposta muito rápida)`);
+    else if (ms > 20000) lines.push(`Pergunta ${i + 1}: ${secs}s (resposta demorada)`);
+  });
+  return lines.length ? `\nDados comportamentais (tempo de resposta):\n${lines.join("\n")}` : "";
+}
 
 export async function POST(req: NextRequest) {
   try {
-    const { answers, scoring }: { answers: number[]; scoring: ScoringResult } = await req.json();
+    const body = await req.json();
+    const {
+      answers,
+      scoring,
+      timings = [],
+      comorbidity,
+      comorbidityAnswers,
+    }: {
+      answers: number[];
+      scoring: ScoringResult;
+      timings: number[];
+      comorbidity: ComorbidityResult | null;
+      comorbidityAnswers: number[] | null;
+    } = body;
 
     const riskLabel =
-      scoring.riskLevel === "high"
-        ? "Risco Elevado"
-        : scoring.riskLevel === "moderate"
-        ? "Risco Moderado"
-        : "Risco Baixo";
+      scoring.riskLevel === "high" ? "Risco Elevado"
+      : scoring.riskLevel === "moderate" ? "Risco Moderado"
+      : "Risco Baixo";
+
+    const comorbiditySection = comorbidity
+      ? `\nTriagem de comorbidades (GAD-2 + PHQ-2):
+- Ansiedade (GAD-2): ${comorbidity.anxietyScore}/6 — ${comorbidity.anxietyPositive ? "POSITIVO (≥3)" : "negativo"}
+- Depressão (PHQ-2): ${comorbidity.depressionScore}/6 — ${comorbidity.depressionPositive ? "POSITIVO (≥3)" : "negativo"}
+- Respostas: ${comorbidityAnswers?.join(", ") ?? "N/A"}`
+      : "\nTriagem de comorbidades: não realizada (risco baixo no ASRS)";
+
+    const timingSection = analyzeTimings(timings);
 
     const { text } = await generateText({
       model: google("gemini-2.5-pro"),
       system: `Você é um psicólogo clínico especialista em TDAH em adultos.
-Escreva laudos de triagem empáticos, claros e baseados em evidências com base nos resultados da escala ASRS-v1.1.
+Escreva laudos de triagem empáticos, claros e baseados em evidências.
 Use linguagem acessível, sem jargão excessivo. Seja honesto mas acolhedor.
-SEMPRE inclua no final que o resultado é uma triagem e não substitui avaliação profissional.
+Quando houver dados de comorbidades, integre-os ao raciocínio clínico — diferencie TDAH puro, TDAH com comorbidades ou possível confusão diagnóstica.
+Quando houver dados de tempo de resposta, mencione apenas se forem clinicamente relevantes.
+SEMPRE finalize lembrando que é uma triagem, não um diagnóstico.
 Responda em português brasileiro.`,
       prompt: `O usuário completou a escala ASRS-v1.1 de auto-avaliação de TDAH em adultos.
 
-Resultados:
+Resultados ASRS:
 - Nível de risco: ${riskLabel}
 - Pontuação Parte A (triagem, máx 6 positivos): ${scoring.partAScore}/6
 - Pontuação bruta Parte A: ${scoring.partATotal}/24
 - Pontuação bruta Parte B: ${scoring.partBTotal}/48
 - Perfil detectado: ${scoring.subtype}
-
-Respostas por pergunta (0=Nunca, 1=Raramente, 2=Às vezes, 3=Frequentemente, 4=Muito frequentemente):
-Parte A (triagem): ${answers.slice(0, 6).join(", ")}
-Parte B (sintomas adicionais): ${answers.slice(6).join(", ")}
+- Respostas Parte A: ${answers.slice(0, 6).join(", ")}
+- Respostas Parte B: ${answers.slice(6).join(", ")}
+(Escala ASRS: 0=Nunca, 1=Raramente, 2=Às vezes, 3=Frequentemente, 4=Muito frequentemente)
+${comorbiditySection}${timingSection}
 
 Escreva um laudo de triagem personalizado em 3 parágrafos:
-1. Interpretação dos resultados e o que eles indicam sobre o perfil do usuário
-2. Padrões específicos observados nas respostas (quais áreas têm mais dificuldade)
-3. Considerações importantes e próximos passos recomendados
+1. Interpretação dos resultados ASRS e o que indicam sobre o perfil atencional
+2. Análise integrada: padrões específicos observados + contexto das comorbidades (se presentes)
+3. Considerações clínicas importantes e próximos passos recomendados
 
-Seja empático, direto e claro. Não use cabeçalhos ou marcadores, apenas parágrafos corridos.`,
+Seja empático, direto e claro. Sem cabeçalhos ou marcadores — apenas parágrafos corridos.`,
     });
 
     return NextResponse.json({ laudo: text });
