@@ -1,5 +1,5 @@
 import { generateText } from "ai";
-import { anthropic } from "@ai-sdk/anthropic";
+import { google } from "@ai-sdk/google";
 import { NextRequest, NextResponse } from "next/server";
 import type { ScoringResult } from "@/lib/asrs-data";
 
@@ -15,7 +15,7 @@ export async function POST(req: NextRequest) {
         : "Risco Baixo";
 
     const { text } = await generateText({
-      model: anthropic("claude-sonnet-4.6"),
+      model: google("gemini-2.5-pro"),
       system: `Você é um psicólogo clínico especialista em TDAH em adultos.
 Escreva laudos de triagem empáticos, claros e baseados em evidências com base nos resultados da escala ASRS-v1.1.
 Use linguagem acessível, sem jargão excessivo. Seja honesto mas acolhedor.
