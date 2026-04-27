@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { scoreAnswers, scoreComorbidities, type RiskLevel, type ScoringResult, type ComorbidityResult } from "@/lib/asrs-data";
+import type { PdfData } from "@/lib/generate-pdf";
 
 const RISK_CONFIG: Record<RiskLevel, { label: string; hue: number }> = {
   low:      { label: "Risco Baixo",    hue: 145 },
@@ -133,6 +134,9 @@ export default function ResultPage() {
   const [comorbidity, setComorbidity] = useState<ComorbidityResult | null>(null);
   const [laudo, setLaudo] = useState<string>("");
   const [loadingLaudo, setLoadingLaudo] = useState(true);
+  const [email, setEmail] = useState("");
+  const [emailStatus, setEmailStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  const pdfDataRef = useRef<PdfData | null>(null);
 
   useEffect(() => {
     const raw = sessionStorage.getItem("tdah_answers");
@@ -158,10 +162,56 @@ export default function ResultPage() {
       body: JSON.stringify({ answers, scoring: result, timings, comorbidity: comorbidityResult, comorbidityAnswers }),
     })
       .then((r) => r.json())
-      .then((data) => setLaudo(data.laudo ?? ""))
+      .then((data) => {
+        const text = data.laudo ?? "";
+        setLaudo(text);
+        pdfDataRef.current = {
+          scoring: result,
+          comorbidity: comorbidityResult,
+          laudo: text,
+          date: new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" }),
+        };
+      })
       .catch(() => setLaudo(""))
       .finally(() => setLoadingLaudo(false));
   }, [router]);
+
+  const handleDownloadPdf = async () => {
+    if (!pdfDataRef.current) return;
+    const { generatePdf } = await import("@/lib/generate-pdf");
+    const bytes = await generatePdf(pdfDataRef.current);
+    const blob = new Blob([bytes.buffer as ArrayBuffer], { type: "application/pdf" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `relatorio-tdah-${new Date().toISOString().slice(0, 10)}.pdf`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleSendEmail = async () => {
+    if (!pdfDataRef.current || !email) return;
+    setEmailStatus("sending");
+    try {
+      const { generatePdf } = await import("@/lib/generate-pdf");
+      const bytes = await generatePdf(pdfDataRef.current);
+      const base64 = btoa(String.fromCharCode(...new Uint8Array(bytes)));
+      const res = await fetch("/api/email", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email,
+          scoring: pdfDataRef.current.scoring,
+          comorbidity: pdfDataRef.current.comorbidity,
+          laudo: pdfDataRef.current.laudo,
+          pdfBase64: base64,
+        }),
+      });
+      setEmailStatus(res.ok ? "sent" : "error");
+    } catch {
+      setEmailStatus("error");
+    }
+  };
 
   if (!scoring) return null;
 
@@ -227,11 +277,68 @@ export default function ResultPage() {
           </div>
         </section>
 
-        <section className="flex flex-col sm:flex-row items-center justify-center gap-3 mb-10">
-          <button onClick={() => window.print()} className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-[14px] font-medium transition-all hover:bg-[var(--tdah-accent-soft)]" style={{ background: "var(--tdah-surface)", border: "1px solid var(--tdah-border)", color: "var(--tdah-ink-muted)" }}>
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M4 6 V2 H12 V6 M4 12 H2 V6 H14 V12 H12 M4 9 H12 V14 H4 Z" /></svg>
-            Imprimir Resultado
+        {/* PDF + Email actions */}
+        <section className="mb-10 rounded-2xl p-6 flex flex-col gap-5" style={{ background: "var(--tdah-surface)", border: "1px solid var(--tdah-border)" }}>
+          <div>
+            <h3 className="text-[16px] font-semibold mb-1" style={{ color: "var(--tdah-ink)" }}>Salvar seu relatório</h3>
+            <p className="text-[13px]" style={{ color: "var(--tdah-ink-soft)" }}>Baixe o PDF ou receba por email para guardar ou levar ao médico.</p>
+          </div>
+
+          {/* Download PDF */}
+          <button
+            onClick={handleDownloadPdf}
+            disabled={loadingLaudo}
+            className="w-full inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-[14px] font-medium transition-all hover:bg-[var(--tdah-accent-soft)] disabled:opacity-40"
+            style={{ background: "var(--tdah-bg)", border: "1px solid var(--tdah-border)", color: "var(--tdah-ink-muted)" }}
+          >
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M8 2 V10 M5 7 L8 10 L11 7" /><path d="M2 12 H14 V14 H2 Z" />
+            </svg>
+            Baixar PDF
           </button>
+
+          {/* Email */}
+          <div className="flex flex-col gap-2">
+            <div className="flex gap-2">
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => { setEmail(e.target.value); setEmailStatus("idle"); }}
+                placeholder="seu@email.com"
+                className="flex-1 px-4 py-3 rounded-xl text-[14px] outline-none transition-all"
+                style={{
+                  background: "var(--tdah-bg)",
+                  border: `1px solid ${emailStatus === "error" ? "oklch(65% 0.2 25)" : "var(--tdah-border)"}`,
+                  color: "var(--tdah-ink)",
+                }}
+              />
+              <button
+                onClick={handleSendEmail}
+                disabled={!email || loadingLaudo || emailStatus === "sending" || emailStatus === "sent"}
+                className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-[14px] font-medium transition-all hover:-translate-y-px disabled:opacity-40 disabled:cursor-not-allowed disabled:translate-y-0"
+                style={{ background: accent, color: "white", boxShadow: `0 1px 0 rgba(255,255,255,0.1) inset, 0 4px 12px -6px var(--tdah-accent)`, whiteSpace: "nowrap" }}
+              >
+                {emailStatus === "sending" ? (
+                  <svg className="animate-spin" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2 A10 10 0 0 1 22 12" /></svg>
+                ) : emailStatus === "sent" ? (
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M2 8 L6 12 L14 4" /></svg>
+                ) : (
+                  <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M2 4 L8 9 L14 4 M2 4 H14 V12 H2 Z" /></svg>
+                )}
+                {emailStatus === "sending" ? "Enviando…" : emailStatus === "sent" ? "Enviado!" : "Enviar"}
+              </button>
+            </div>
+            {emailStatus === "sent" && (
+              <p className="text-[12px]" style={{ color: "oklch(50% 0.15 145)" }}>✓ Email enviado com o relatório em PDF em anexo.</p>
+            )}
+            {emailStatus === "error" && (
+              <p className="text-[12px]" style={{ color: "oklch(55% 0.2 25)" }}>Falha ao enviar. Verifique o email e tente novamente.</p>
+            )}
+          </div>
+        </section>
+
+        {/* Restart */}
+        <section className="flex justify-center mb-10">
           <button onClick={() => { sessionStorage.clear(); router.push("/"); }} className="inline-flex items-center justify-center gap-2 px-5 py-3 rounded-xl text-[14px] font-medium transition-all hover:-translate-y-px active:translate-y-0" style={{ background: accent, color: "white", boxShadow: `0 1px 0 rgba(255,255,255,0.1) inset, 0 6px 16px -8px ${accent}` }}>
             <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 8 a5 5 0 0 1 9 -3 M12 5 V2 M12 5 H15" /><path d="M13 8 a5 5 0 0 1 -9 3 M4 11 V14 M4 11 H1" /></svg>
             Refazer Avaliação
