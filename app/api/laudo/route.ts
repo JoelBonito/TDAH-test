@@ -1,5 +1,5 @@
 import { generateText } from "ai";
-import { google } from "@ai-sdk/google";
+import { openai } from "@ai-sdk/openai";
 import { NextRequest, NextResponse } from "next/server";
 import type { ScoringResult, ComorbidityResult } from "@/lib/asrs-data";
 
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
     const timingSection = analyzeTimings(timings);
 
     const { text } = await generateText({
-      model: google("gemini-2.0-flash"),
+      model: openai("gpt-4o"),
       system: `Você é um psicólogo clínico especialista em TDAH em adultos.
 Escreva laudos de triagem empáticos, claros e baseados em evidências.
 Use linguagem acessível, sem jargão excessivo. Seja honesto mas acolhedor.
