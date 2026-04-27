@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
     const timingSection = analyzeTimings(timings);
 
     const { text } = await generateText({
-      model: google("gemini-2.5-pro"),
+      model: google("gemini-2.0-flash"),
       system: `Você é um psicólogo clínico especialista em TDAH em adultos.
 Escreva laudos de triagem empáticos, claros e baseados em evidências.
 Use linguagem acessível, sem jargão excessivo. Seja honesto mas acolhedor.
@@ -78,9 +78,10 @@ Seja empático, direto e claro. Sem cabeçalhos ou marcadores — apenas parágr
 
     return NextResponse.json({ laudo: text });
   } catch (error) {
-    console.error("Laudo generation error:", error);
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error("Laudo generation error:", msg);
     return NextResponse.json(
-      { laudo: "Não foi possível gerar o laudo personalizado. Por favor, consulte um especialista com os dados da sua pontuação." },
+      { error: msg, laudo: "Não foi possível gerar o laudo personalizado. Por favor, consulte um especialista com os dados da sua pontuação." },
       { status: 500 }
     );
   }
