@@ -133,7 +133,7 @@ export async function POST(req: NextRequest) {
     const date = new Date().toLocaleDateString("pt-BR", { day: "2-digit", month: "long", year: "numeric" });
 
     await resend.emails.send({
-      from: "Triagem TDAH <onboarding@resend.dev>",
+      from: "Triagem TDAH <noreply@gestionchs.inoveai.online>",
       to: email,
       subject: `Seu relatório de triagem TDAH — ${date}`,
       html: buildEmailHtml(scoring, comorbidity, laudo, date),
